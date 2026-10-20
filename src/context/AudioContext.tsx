@@ -1,5 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import {
+  createAudioPlayer,
+  setAudioModeAsync,
+  AudioPlayer,
+  AudioStatus,
+} from 'expo-audio';
 import { ClassicalWork, Movement, Interpretation, PlayerCurrentTrack } from '../types';
 import { YouTubeAudioService, StreamInfo } from '../services/youtubeService';
 
@@ -28,7 +33,6 @@ interface AudioContextType {
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
 
 export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [currentTrack, setCurrentTrack] = useState<PlayerCurrentTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isBuffering, setIsBuffering] = useState<boolean>(false);
@@ -38,7 +42,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
   const [favorites, setFavorites] = useState<string[]>(['vivaldi-primavera', 'verdi-traviata']);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const currentTrackRef = useRef<PlayerCurrentTrack | null>(null);
   currentTrackRef.current = currentTrack;
 
@@ -46,12 +50,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     async function setupAudio() {
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionMode: 'duckOthers',
         });
       } catch (err) {
         console.warn('Errore configurazione AudioMode:', err);
@@ -60,8 +62,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setupAudio();
 
     return () => {
-      if (soundRef.current) {
-        soundRef.current.unloadAsync();
+      if (playerRef.current) {
+        playerRef.current.remove();
       }
     };
   }, []);
@@ -74,8 +76,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSleepTimerMinutes((prev) => {
         if (prev === null || prev <= 1) {
           clearInterval(timer);
-          if (soundRef.current) {
-            soundRef.current.pauseAsync();
+          if (playerRef.current) {
+            playerRef.current.pause();
           }
           setIsPlaying(false);
           return null;
@@ -87,22 +89,33 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => clearInterval(timer);
   }, [sleepTimerMinutes]);
 
-  const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (status.error) {
-        console.warn('Errore riproduzione:', status.error);
-        setIsBuffering(false);
+  // Periodic ticker to sync playback position and auto-advance
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const p = playerRef.current;
+      if (p) {
+        setIsPlaying(p.playing);
+        setIsBuffering(p.isBuffering);
+        if (typeof p.currentTime === 'number') {
+          setPositionMillis(Math.floor(p.currentTime * 1000));
+        }
+        if (typeof p.duration === 'number' && p.duration > 0) {
+          setDurationMillis(Math.floor(p.duration * 1000));
+        }
       }
-      return;
-    }
+    }, 500);
 
-    setIsPlaying(status.isPlaying);
+    return () => clearInterval(interval);
+  }, []);
+
+  const onPlaybackStatusUpdate = (status: AudioStatus) => {
+    setIsPlaying(status.playing);
     setIsBuffering(status.isBuffering);
-    setPositionMillis(status.positionMillis);
-    setDurationMillis(status.durationMillis || 0);
+    setPositionMillis(Math.floor((status.currentTime || 0) * 1000));
+    setDurationMillis(Math.floor((status.duration || 0) * 1000));
 
     // Auto-advance to next movement
-    if (status.didJustFinish && !status.isLooping) {
+    if (status.didJustFinish && !status.loop) {
       handleAutoAdvance();
     }
   };
@@ -113,7 +126,6 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const nextIndex = cur.movement.index; // index is 1-based, so next movement in array is index
     if (nextIndex < cur.work.movements.length) {
-      const nextMov = cur.work.movements[nextIndex];
       playTrack(cur.work, nextIndex, cur.interpretation.id);
     }
   };
@@ -138,11 +150,14 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         interpretation: targetInterpretation,
       });
 
-      // 1. Unload existing sound
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-        setSound(null);
+      // 1. Remove previous player
+      if (playerRef.current) {
+        try {
+          playerRef.current.remove();
+        } catch (e) {
+          // ignore
+        }
+        playerRef.current = null;
       }
 
       // 2. Resolve YouTube Audio Stream or fallback
@@ -154,18 +169,24 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const resolved = await YouTubeAudioService.resolveAudioStream(videoId, fallback);
       setStreamInfo(resolved);
 
-      // 3. Create and play new audio stream
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: resolved.url },
-        {
-          shouldPlay: true,
-          progressUpdateIntervalMillis: 500,
-        },
-        onPlaybackStatusUpdate
-      );
+      // 3. Create audio player with expo-audio
+      const player = createAudioPlayer({ uri: resolved.url }, { updateInterval: 500 });
+      (player as any).addListener?.('playbackStatusUpdate', onPlaybackStatusUpdate);
 
-      soundRef.current = newSound;
-      setSound(newSound);
+      try {
+        player.setActiveForLockScreen(true, {
+          title: targetMovement.title,
+          artist: `${work.title} · ${targetInterpretation.performer}`,
+          albumTitle: work.catalogNumber,
+          artworkUrl: work.coverImage,
+        });
+      } catch (e) {
+        // lock screen optional
+      }
+
+      player.play();
+
+      playerRef.current = player;
       setIsPlaying(true);
       setIsBuffering(false);
     } catch (err: any) {
@@ -175,13 +196,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const togglePlayPause = async () => {
-    if (!soundRef.current) return;
+    if (!playerRef.current) return;
     try {
       if (isPlaying) {
-        await soundRef.current.pauseAsync();
+        playerRef.current.pause();
         setIsPlaying(false);
       } else {
-        await soundRef.current.playAsync();
+        playerRef.current.play();
         setIsPlaying(true);
       }
     } catch (e) {
@@ -190,9 +211,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const seekTo = async (millis: number) => {
-    if (!soundRef.current) return;
+    if (!playerRef.current) return;
     try {
-      await soundRef.current.setPositionAsync(millis);
+      await playerRef.current.seekTo(millis / 1000);
       setPositionMillis(millis);
     } catch (e) {
       console.warn('Errore seek:', e);
@@ -200,13 +221,13 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const skipForward = async (seconds = 15) => {
-    if (!soundRef.current) return;
+    if (!playerRef.current) return;
     const newPos = Math.min(positionMillis + seconds * 1000, durationMillis);
     await seekTo(newPos);
   };
 
   const skipBackward = async (seconds = 15) => {
-    if (!soundRef.current) return;
+    if (!playerRef.current) return;
     const newPos = Math.max(positionMillis - seconds * 1000, 0);
     await seekTo(newPos);
   };
