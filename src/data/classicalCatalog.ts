@@ -81,6 +81,16 @@ export const COMPOSERS: Composer[] = [
     portrait: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/Giacomo_Puccini.jpg/440px-Giacomo_Puccini.jpg',
     bio: 'Maestro indiscusso del melodramma verista, capace di melodie toccanti e orchestra modernissima in Bohème, Tosca e Turandot.',
   },
+  {
+    id: 'debussy',
+    name: 'Claude Debussy',
+    fullName: 'Achille-Claude Debussy',
+    years: '1862 – 1918',
+    era: 'novecento',
+    country: 'Francia',
+    portrait: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Claude_Debussy_atelier_Nadar.jpg/440px-Claude_Debussy_atelier_Nadar.jpg',
+    bio: 'Padre dell\'impressionismo musicale. Ha rivoluzionato l\'armonia, il timbro e la concezione del tempo con capolavori senza tempo come Clair de Lune, Prélude à l\'après-midi d\'un faune e La Mer.',
+  },
 ];
 
 export const WORKS: ClassicalWork[] = [
@@ -607,6 +617,71 @@ export const WORKS: ClassicalWork[] = [
         performer: 'Maurizio Pollini',
         year: '2005',
         youtubeVideoId: 'p29JUpsOSTE',
+      },
+    ],
+  },
+
+  // --- DEBUSSY: SUITE BERGAMASQUE (CLAIR DE LUNE) ---
+  {
+    id: 'debussy-suite-bergamasque',
+    composerId: 'debussy',
+    title: 'Suite bergamasque (Clair de lune)',
+    subtitle: 'Suite per pianoforte ispirata ai versi di Paul Verlaine',
+    catalogNumber: 'L. 75',
+    key: 'Fa magg. / La min. / Re bemolle magg.',
+    era: 'novecento',
+    genre: 'strumentale',
+    yearComposed: '1890 – 1905',
+    coverImage: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?q=80&w=800&auto=format&fit=crop',
+    description: 'Il capolavoro pianistico dell\'impressionismo debussiano. Il celeberrimo terzo movimento, Clair de lune, evoca la magia lunare con arpeggi fluttuanti e un\'armonia sospesa nel sogno.',
+    movements: [
+      {
+        id: 'deb-1',
+        index: 1,
+        title: 'I. Prélude',
+        tempo: 'Moderato (tempo rubato)',
+        durationApprox: '4:15',
+        description: 'Apertura nobile e arcaicizzante che fonde stile barocco e armonie impressioniste.',
+      },
+      {
+        id: 'deb-2',
+        index: 2,
+        title: 'II. Menuet',
+        tempo: 'Andantino',
+        durationApprox: '4:30',
+        description: 'Danza delicata e ironica con pizzicati pianistici leggeri.',
+      },
+      {
+        id: 'deb-3',
+        index: 3,
+        title: 'III. Clair de lune',
+        tempo: 'Andante très expressif',
+        durationApprox: '5:05',
+        description: 'La celeberrima pagina poetica notturna, caposaldo della letteratura pianistica.',
+      },
+      {
+        id: 'deb-4',
+        index: 4,
+        title: 'IV. Passepied',
+        tempo: 'Allegretto ma non troppo',
+        durationApprox: '3:50',
+        description: 'Danza brillante di sapore antico in tempo di 4/4 con accompagnamento a staccato continuo.',
+      },
+    ],
+    interpretations: [
+      {
+        id: 'pressler-debussy',
+        label: 'Menahem Pressler (Live Salle Pleyel)',
+        performer: 'Menahem Pressler (pianoforte)',
+        year: '2014 (Poesia pura)',
+        youtubeVideoId: '-Bxpm0EmOMU',
+      },
+      {
+        id: 'thiollier-debussy',
+        label: 'François-Joël Thiollier (Naxos)',
+        performer: 'François-Joël Thiollier',
+        year: '1998 (Integrale Debussy)',
+        youtubeVideoId: 'WNcsUNKlAKw',
       },
     ],
   },
