@@ -39,19 +39,27 @@ src/theme/colors.ts              palette
 ## Come funziona la ricerca
 
 `YouTubeAudioService.searchClassical()` scarica la pagina HTML
-`https://www.youtube.com/results?search_query=...` e legge la variabile globale
+`https://www.youtube.com/results?search_query=...` e ne legge la variabile globale
 `ytInitialData`, estraendo titolo, canale, durata e miniatura (max 15 risultati).
 
-Due limiti noti e strutturali, non bug di distrazione:
+Il parser non usa un percorso JSON fisso: percorre l'intero payload alla ricerca di nodi
+`videoRenderer`, quindi regge le riorganizzazioni della risposta di YouTube. L'estrazione
+del JSON è a conta di parentesi (non una regex pigra, che si fermava al primo `};`
+incontrato anche dentro una stringa di testo). La richiesta porta i cookie `SOCS`/`CONSENT`
+e i parametri `hl=en&gl=US&ucbcb=1` per evitare il reindirizzamento alla schermata di
+consenso GDPR, che da IP italiano arrivava una pagina priva di `ytInitialData`.
 
-1. **Dipende dall'HTML di YouTube.** Se YouTube cambia la variabile, o serve una pagina
-   di consenso GDPR/cookie (tipico da IP Unione Europea), il parser non trova
-   `ytInitialData` e la funzione **ritorna array vuoto in silenzio**: l'interfaccia mostra
-   "nessun risultato" invece di un errore. È la causa più probabile di una ricerca "Debussy"
-   senza esiti.
-2. **Non funziona da browser.** Da una build web (react-native-web) lo stesso `fetch` viene
-   bloccato dalla same-origin policy: YouTube non invia header `Access-Control-Allow-Origin`.
-   Una versione web ospitata della ricerca richiede un piccolo backend proxy, non un sito statico.
+ritorna `SearchOutcome { results, failure?, attemptedQuery }` e **non lancia mai eccezioni**:
+quando non trova nulla dice perché (`network`, `http`, `consent`, `botcheck`, `no-payload`,
+`no-results`), e l'interfaccia lo mostra con un messaggio e un pulsante "Riprova". Se il
+suffisso `classical` aggiunto alla query azzera i risultati, riprova con le parole esatte
+dell'utente.
+
+Limite strutturale che resta: **da browser non può funzionare**. La build web (react-native-web)
+sottopone lo stesso `fetch` alla same-origin policy e YouTube non invia header
+`Access-Control-Allow-Origin`: una versione web ospitata della ricerca richiede un backend
+proxy, non un sito statico. Su Android/iOS il `fetch` nativo non è soggetto a CORS.
+
 
 ## Percorsi per "usarla ovunque"
 

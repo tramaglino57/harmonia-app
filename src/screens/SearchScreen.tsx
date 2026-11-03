@@ -8,12 +8,13 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { WORKS, COMPOSERS } from '../data/classicalCatalog';
 import { ClassicalWork, Composer } from '../types';
-import { YouTubeAudioService, SearchResult } from '../services/youtubeService';
+import { YouTubeAudioService, SearchResult, SearchFailure } from '../services/youtubeService';
 import { useAudio } from '../context/AudioContext';
 
 interface SearchScreenProps {
@@ -32,6 +33,18 @@ const POPULAR_TAGS = [
   'Canto Gregoriano',
 ];
 
+const YT_FAILURE_TEXT: Record<SearchFailure, string> = {
+  network: 'YouTube non ha risposto (rete lenta o connessione interrotta). Riprova.',
+  http: 'YouTube ha rifiutato la richiesta con un errore del server. Riprova fra qualche secondo.',
+  consent:
+    'YouTube ha intercettato la ricerca con la finestra di consenso sui cookie, che non contiene risultati. Se accade sempre, vanno aggiornati i cookie del servizio di ricerca.',
+  botcheck:
+    'YouTube chiede una verifica "non sono un robot" e la app non può superarla. Aspetta qualche minuto e riprova.',
+  'no-payload':
+    'YouTube ha restituito una pagina senza dati di ricerca: ha probabilmente cambiato formato e il parser è obsoleto.',
+  'no-results': 'Nessuna registrazione trovata per questa ricerca.',
+};
+
 export const SearchScreen: React.FC<SearchScreenProps> = ({
   onSelectWork,
   onOpenPlayer,
@@ -40,6 +53,8 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   const [query, setQuery] = useState('');
   const [isSearchingYouTube, setIsSearchingYouTube] = useState(false);
   const [ytResults, setYtResults] = useState<SearchResult[]>([]);
+  const [ytFailure, setYtFailure] = useState<SearchFailure | null>(null);
+  const [ytSearched, setYtSearched] = useState(false);
 
   // Filter local catalog
   const filteredWorks = query.trim()
@@ -61,12 +76,16 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
     if (!query.trim()) return;
     setIsSearchingYouTube(true);
     setYtResults([]);
+    setYtFailure(null);
     try {
-      const results = await YouTubeAudioService.searchClassical(query);
-      setYtResults(results);
+      const outcome = await YouTubeAudioService.searchClassical(query);
+      setYtResults(outcome.results);
+      setYtFailure(outcome.results.length === 0 ? outcome.failure || 'no-results' : null);
     } catch (e) {
       console.warn('Errore ricerca YouTube:', e);
+      setYtFailure('network');
     } finally {
+      setYtSearched(true);
       setIsSearchingYouTube(false);
     }
   };
@@ -230,7 +249,7 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
                   {item.uploaderName}
                 </Text>
                 <View style={styles.ytFooter}>
-                  <Text style={styles.ytDuration}>{item.durationString}</Text>
+                  <Text style={styles.ytDuration}>{item.durationString || 'Live / n.d.'}</Text>
                   <View style={styles.audioBadge}>
                     <Text style={styles.audioBadgeText}>Flusso Audio</Text>
                   </View>
@@ -239,6 +258,24 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
               <Ionicons name="play-circle" size={28} color={Colors.gold} />
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {/* YouTube search ran but produced nothing: say WHY instead of showing silence */}
+      {ytSearched && !isSearchingYouTube && ytResults.length === 0 && (
+        <View style={styles.ytEmptyBox}>
+          <Ionicons name="alert-circle-outline" size={20} color={Colors.gold} />
+          <Text style={styles.ytEmptyText}>
+            {Platform.OS === 'web'
+              ? 'La ricerca YouTube da browser è bloccata dalla same-origin policy: youtube.com non invia header CORS. Usa la app su Android/iOS, oppure aggiungi un backend proxy.'
+              : ytFailure
+                ? YT_FAILURE_TEXT[ytFailure]
+                : 'La ricerca non ha prodotto risultati.'}
+          </Text>
+          <TouchableOpacity style={styles.ytRetryBtn} onPress={handleSearchYouTube}>
+            <Ionicons name="refresh" size={15} color="#0C0C12" />
+            <Text style={styles.ytRetryText}>Riprova</Text>
+          </TouchableOpacity>
         </View>
       )}
     </ScrollView>
@@ -417,5 +454,35 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: Colors.gold,
     fontWeight: '700',
+  },
+  ytEmptyBox: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    gap: 10,
+  },
+  ytEmptyText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: Colors.textSecondary,
+  },
+  ytRetryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: Colors.gold,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+  },
+  ytRetryText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0C0C12',
   },
 });
