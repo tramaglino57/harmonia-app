@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { isRunningInExpoGo } from 'expo';
 import {
   createAudioPlayer,
   setAudioModeAsync,
@@ -173,15 +174,19 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const player = createAudioPlayer({ uri: resolved.url }, { updateInterval: 500 });
       (player as any).addListener?.('playbackStatusUpdate', onPlaybackStatusUpdate);
 
-      try {
-        player.setActiveForLockScreen(true, {
-          title: targetMovement.title,
-          artist: `${work.title} · ${targetInterpretation.performer}`,
-          albumTitle: work.catalogNumber,
-          artworkUrl: work.coverImage,
-        });
-      } catch (e) {
-        // lock screen optional
+      // Expo Go non include il servizio di riproduzione in background:
+      // i controlli della schermata di blocco funzionano solo in una development/production build.
+      if (!isRunningInExpoGo()) {
+        try {
+          player.setActiveForLockScreen(true, {
+            title: targetMovement.title,
+            artist: `${work.title} · ${targetInterpretation.performer}`,
+            albumTitle: work.catalogNumber,
+            artworkUrl: work.coverImage,
+          });
+        } catch (e) {
+          // lock screen optional
+        }
       }
 
       player.play();
