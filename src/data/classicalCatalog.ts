@@ -141,7 +141,7 @@ export const WORKS: ClassicalWork[] = [
         orchestraOrEnsemble: 'Europa Galante',
         conductor: 'Fabio Biondi',
         year: '2000 (Strumenti d\'epoca)',
-        youtubeVideoId: 'TKthRw40vEg',
+        youtubeVideoId: 'TsKBLYmwo5U',
         fallbackAudioUrl: 'https://raw.githubusercontent.com/mdn/webaudio-examples/master/audio-analyser/viper.ogg',
       },
       {
@@ -337,7 +337,7 @@ export const WORKS: ClassicalWork[] = [
         performer: 'Orchestra Internazionale',
         conductor: 'Leonard Bernstein',
         year: '1989 (Storica caduta del Muro)',
-        youtubeVideoId: 'IInG5nY_wrU',
+        youtubeVideoId: 'Hn0IS-vlwCI',
       },
     ],
   },
@@ -406,7 +406,7 @@ export const WORKS: ClassicalWork[] = [
         conductor: 'Carlo Rizzi',
         orchestraOrEnsemble: 'Wiener Philharmoniker',
         year: '2005',
-        youtubeVideoId: 'uW_GvMvWbO4',
+        youtubeVideoId: 'plvzA5rjZJs',
       },
     ],
     libretto: [
@@ -479,7 +479,7 @@ export const WORKS: ClassicalWork[] = [
         performer: 'Luciano Pavarotti, Mirella Freni',
         conductor: 'Nicola Rescigno',
         year: '1978',
-        youtubeVideoId: '4mX7wwuhfbQ',
+        youtubeVideoId: 'UuQdEyz6b6w',
       },
       {
         id: 'callas-de-sabata',
@@ -488,7 +488,7 @@ export const WORKS: ClassicalWork[] = [
         conductor: 'Victor de Sabata',
         orchestraOrEnsemble: 'Coro e Orchestra del Teatro alla Scala',
         year: '1953 (Registrazione storica assoluta)',
-        youtubeVideoId: 'H_7kW8fW9C8',
+        youtubeVideoId: 'Nk5KrlxePzI',
       },
     ],
     libretto: [
@@ -551,7 +551,7 @@ export const WORKS: ClassicalWork[] = [
         performer: 'Le Concert des Nations & La Capella Reial de Catalunya',
         conductor: 'Jordi Savall',
         year: '2002',
-        youtubeVideoId: 'mjpFi9a13ns',
+        youtubeVideoId: 'mjpFi9bn1do',
       },
       {
         id: 'gardiner-orfeo',
@@ -559,7 +559,7 @@ export const WORKS: ClassicalWork[] = [
         performer: 'Anthony Rolfe Johnson (Orfeo)',
         conductor: 'Sir John Eliot Gardiner',
         year: '1987',
-        youtubeVideoId: '3maZ5G5jW2E',
+        youtubeVideoId: 'c2snjRPl6yY',
       },
     ],
   },

@@ -125,7 +125,9 @@ export class YouTubeAudioService {
       if (!response.ok) return [];
 
       const html = await response.text();
-      const match = html.match(/var ytInitialData = ({.*?});<\/script>/);
+      const match =
+        html.match(/ytInitialData\s*=\s*({.+?});<\/script>/s) ||
+        html.match(/ytInitialData\s*=\s*({.+?});/s);
       if (!match) return [];
 
       const data = JSON.parse(match[1]);
