@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,15 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  Keyboard,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { WORKS, COMPOSERS } from '../data/classicalCatalog';
-import { ClassicalWork, Composer } from '../types';
+import { ClassicalWork } from '../types';
 import { YouTubeAudioService, SearchResult, SearchFailure } from '../services/youtubeService';
+import { buildWorkFromSearchResult } from '../utils/externalWork';
 import { useAudio } from '../context/AudioContext';
 
 interface SearchScreenProps {
@@ -22,16 +25,6 @@ interface SearchScreenProps {
   onOpenPlayer: () => void;
 }
 
-const POPULAR_TAGS = [
-  'Verdi Traviata',
-  'Puccini Tosca',
-  'Bach Brandeburghesi',
-  'Vivaldi Primavera',
-  'Mozart Requiem',
-  'Chopin Notturni',
-  'Monteverdi Orfeo',
-  'Canto Gregoriano',
-];
 
 const YT_FAILURE_TEXT: Record<SearchFailure, string> = {
   network: 'YouTube non ha risposto (rete lenta o connessione interrotta). Riprova.',
@@ -49,12 +42,23 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
   onSelectWork,
   onOpenPlayer,
 }) => {
-  const { playTrack } = useAudio();
+  const {
+    playQueue,
+    recordSearch,
+    history,
+    clearHistory,
+    favorites,
+    externalFavorites,
+    removeFavorite,
+  } = useAudio();
   const [query, setQuery] = useState('');
   const [isSearchingYouTube, setIsSearchingYouTube] = useState(false);
   const [ytResults, setYtResults] = useState<SearchResult[]>([]);
   const [ytFailure, setYtFailure] = useState<SearchFailure | null>(null);
   const [ytSearched, setYtSearched] = useState(false);
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
+
+  const favoritesWorks = WORKS.filter((w) => favorites.includes(w.id));
 
   // Filter local catalog
   const filteredWorks = query.trim()
@@ -72,64 +76,59 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
       })
     : [];
 
-  const handleSearchYouTube = async () => {
-    if (!query.trim()) return;
+  const runYouTubeSearch = async (term: string) => {
     setIsSearchingYouTube(true);
     setYtResults([]);
     setYtFailure(null);
+    // Keyboard covers the results on a phone: dismiss it and lift the viewport
+    // to the top of the results section once they land.
+    Keyboard.dismiss();
     try {
-      const outcome = await YouTubeAudioService.searchClassical(query);
+      const outcome = await YouTubeAudioService.searchClassical(term);
       setYtResults(outcome.results);
       setYtFailure(outcome.results.length === 0 ? outcome.failure || 'no-results' : null);
+      recordSearch(term);
     } catch (e) {
       console.warn('Errore ricerca YouTube:', e);
       setYtFailure('network');
     } finally {
       setYtSearched(true);
       setIsSearchingYouTube(false);
+      // The YouTube results render at the END of this screen, after the
+      // catalog section: scrollToEnd (not scrollTo 0) is what actually brings
+      // them into view once the layout has been computed.
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }, 260);
     }
   };
 
-  const handlePlayYouTubeResult = (res: SearchResult) => {
-    // Wrap youtube result into an impromptu ClassicalWork structure
-    const customWork: ClassicalWork = {
-      id: `yt-${res.videoId}`,
-      composerId: 'external',
-      title: res.title,
-      catalogNumber: 'Registrazione YouTube',
-      era: 'classicismo',
-      genre: 'sinfonica',
-      yearComposed: 'Classica',
-      coverImage:
-        res.thumbnailUrl ||
-        'https://images.unsplash.com/photo-1507838153414-b4b713384a76?q=80&w=800&auto=format&fit=crop',
-      description: `Registrazione caricata da ${res.uploaderName}.`,
-      movements: [
-        {
-          id: `mov-${res.videoId}`,
-          index: 1,
-          title: res.title,
-          tempo: 'Registrazione integrale',
-          durationApprox: res.durationString,
-          youtubeVideoId: res.videoId,
-        },
-      ],
-      interpretations: [
-        {
-          id: `interp-${res.videoId}`,
-          label: res.uploaderName,
-          performer: res.uploaderName,
-          youtubeVideoId: res.videoId,
-        },
-      ],
-    };
+  const handleSearchYouTube = () => {
+    const term = query.trim();
+    if (!term) return;
+    runYouTubeSearch(term);
+  };
 
-    playTrack(customWork, 0);
+  const handlePlayYouTubeResult = (res: SearchResult, index: number) => {
+    // The whole result list becomes the queue, so ENDED continues playing.
+    playQueue(
+      ytResults.map((r) => ({ work: buildWorkFromSearchResult(r), movementIndex: 0 })),
+      index
+    );
+    onOpenPlayer();
+  };
+
+  const playSavedRecording = (work: ClassicalWork) => {
+    playQueue([{ work, movementIndex: 0 }], 0);
     onOpenPlayer();
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
+    >
       {/* Search Input Bar */}
       <View style={styles.searchBar}>
         <Ionicons name="search" size={20} color={Colors.gold} style={styles.searchIcon} />
@@ -149,23 +148,121 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
         )}
       </View>
 
-      {/* Suggested Classical Tags */}
+      {/* Your own searches + your saved recordings, replacing the old fixed suggestions */}
       {!query && (
-        <View style={styles.tagsSection}>
-          <Text style={styles.sectionTitle}>Ricerche Consigliate</Text>
-          <View style={styles.tagsGrid}>
-            {POPULAR_TAGS.map((tag) => (
-              <TouchableOpacity
-                key={tag}
-                style={styles.tag}
-                onPress={() => {
-                  setQuery(tag);
-                }}
-              >
-                <Ionicons name="musical-notes-outline" size={12} color={Colors.gold} />
-                <Text style={styles.tagText}>{tag}</Text>
-              </TouchableOpacity>
-            ))}
+        <View>
+          <View style={styles.tagsSection}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Le Tue Ricerche</Text>
+              {history.length > 0 && (
+                <TouchableOpacity onPress={clearHistory} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.clearHistoryText}>Svuota</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {history.length === 0 ? (
+              <Text style={styles.hintText}>
+                Qui compariranno le ricerche che farai. La lista è salvata sul telefono e resta
+                anche se chiudi l'app.
+              </Text>
+            ) : (
+              <View style={styles.tagsGrid}>
+                {history.map((item) => (
+                  <TouchableOpacity
+                    key={item.term}
+                    style={styles.tag}
+                    onPress={() => {
+                      setQuery(item.term);
+                      runYouTubeSearch(item.term);
+                    }}
+                  >
+                    <Ionicons name="time-outline" size={12} color={Colors.gold} />
+                    <Text style={styles.tagText}>{item.term}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.tagsSection}>
+            <Text style={styles.sectionTitle}>
+              Preferiti ({favoritesWorks.length + externalFavorites.length})
+            </Text>
+
+            {favoritesWorks.length + externalFavorites.length === 0 ? (
+              <Text style={styles.hintText}>
+                Tocca il cuore su un brano o su una registrazione YouTube per ritrovarla qui.
+              </Text>
+            ) : (
+              <>
+                {externalFavorites.map((track) => {
+                  const work = buildWorkFromSearchResult({
+                    videoId: track.videoId,
+                    title: track.title,
+                    uploaderName: track.uploaderName,
+                    durationString: track.durationString,
+                    thumbnailUrl: track.thumbnailUrl,
+                  });
+                  return (
+                    <TouchableOpacity
+                      key={track.id}
+                      style={styles.favRow}
+                      onPress={() => playSavedRecording(work)}
+                      activeOpacity={0.8}
+                    >
+                      <Image source={{ uri: track.thumbnailUrl || work.coverImage }} style={styles.favThumb} />
+                      <View style={styles.favInfo}>
+                        <Text style={styles.favTitle} numberOfLines={1}>
+                          {track.title}
+                        </Text>
+                        <Text style={styles.favSub} numberOfLines={1}>
+                          {track.uploaderName} · {track.durationString || 'YouTube'}
+                        </Text>
+                      </View>
+                      <Ionicons name="play-circle" size={24} color={Colors.gold} />
+                      <TouchableOpacity
+                        onPress={() => removeFavorite(track.id)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.favRemove}
+                      >
+                        <Ionicons name="close" size={16} color={Colors.textMuted} />
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {favoritesWorks.map((work) => {
+                  const comp = COMPOSERS.find((c) => c.id === work.composerId);
+                  return (
+                    <TouchableOpacity
+                      key={work.id}
+                      style={styles.favRow}
+                      onPress={() => onSelectWork(work)}
+                      activeOpacity={0.8}
+                    >
+                      <Image source={{ uri: work.coverImage }} style={styles.favThumb} />
+                      <View style={styles.favInfo}>
+                        <Text style={styles.favTitle} numberOfLines={1}>
+                          {work.title}
+                        </Text>
+                        <Text style={styles.favSub} numberOfLines={1}>
+                          {comp?.name} · {work.catalogNumber}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+                      <TouchableOpacity
+                        onPress={() => removeFavorite(work.id)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.favRemove}
+                      >
+                        <Ionicons name="close" size={16} color={Colors.textMuted} />
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
           </View>
         </View>
       )}
@@ -234,11 +331,11 @@ export const SearchScreen: React.FC<SearchScreenProps> = ({
             Tocca per avviare lo streaming audio in background:
           </Text>
 
-          {ytResults.map((item) => (
+          {ytResults.map((item, index) => (
             <TouchableOpacity
               key={item.videoId}
               style={styles.ytCard}
-              onPress={() => handlePlayYouTubeResult(item)}
+              onPress={() => handlePlayYouTubeResult(item, index)}
             >
               <Image source={{ uri: item.thumbnailUrl }} style={styles.ytThumb} />
               <View style={styles.ytContent}>
@@ -484,5 +581,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#0C0C12',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  clearHistoryText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.gold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  hintText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: Colors.textMuted,
+    marginTop: 4,
+  },
+  favRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+  },
+  favThumb: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceVariant,
+  },
+  favInfo: {
+    flex: 1,
+    marginHorizontal: 10,
+  },
+  favTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  favSub: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  favRemove: {
+    paddingLeft: 6,
   },
 });

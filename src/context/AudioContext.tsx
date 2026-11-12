@@ -1,5 +1,15 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { ClassicalWork, Movement, Interpretation, PlayerCurrentTrack } from '../types';
+import React, { createContext, useContext, useEffect, useReducer, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ClassicalWork, PlayerCurrentTrack, QueueEntry, ExternalFavoriteTrack, SearchHistoryItem } from '../types';
+import {
+  reducer,
+  initialState,
+  HarmoniaState,
+  selectLibrary,
+  MAX_HISTORY_ITEMS,
+} from '../state/harmoniaReducer';
+
+export const LIBRARY_STORAGE_KEY = '@harmonia/library/v1';
 
 interface AudioContextType {
   currentTrack: PlayerCurrentTrack | null;
@@ -9,7 +19,12 @@ interface AudioContextType {
   durationMillis: number;
   sleepTimerMinutes: number | null;
   favorites: string[];
-  playTrack: (work: ClassicalWork, movementIndex?: number, interpretationId?: string) => Promise<void>;
+  externalFavorites: ExternalFavoriteTrack[];
+  history: SearchHistoryItem[];
+  libraryLoaded: boolean;
+  playTrack: (work: ClassicalWork, movementIndex?: number, interpretationId?: string) => void;
+  playQueue: (entries: QueueEntry[], startIndex?: number) => void;
+  advanceOnEnded: () => void;
   togglePlayPause: () => void;
   setIsPlaying: (playing: boolean) => void;
   seekTo: (millis: number) => void;
@@ -17,166 +32,99 @@ interface AudioContextType {
   skipBackward: (seconds?: number) => void;
   nextMovement: () => void;
   previousMovement: () => void;
-  switchInterpretation: (interpretationId: string) => void;
   setSleepTimer: (minutes: number | null) => void;
-  toggleFavorite: (workId: string) => void;
+  toggleFavorite: (work: ClassicalWork) => void;
   isFavorite: (workId: string) => boolean;
+  removeFavorite: (workId: string) => void;
+  clearHistory: () => void;
+  recordSearch: (term: string) => void;
   updateProgress: (currentTimeSec: number, durationSec?: number) => void;
 }
 
 const AudioContext = createContext<AudioContextType | undefined>(undefined);
 
 export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentTrack, setCurrentTrack] = useState<PlayerCurrentTrack | null>(null);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isBuffering, setIsBuffering] = useState<boolean>(false);
-  const [positionMillis, setPositionMillis] = useState<number>(0);
-  const [durationMillis, setDurationMillis] = useState<number>(0);
-  const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
-  const [favorites, setFavorites] = useState<string[]>(['vivaldi-primavera', 'verdi-traviata', 'debussy-suite-bergamasque']);
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [libraryLoaded, setLibraryLoaded] = React.useState(false);
 
-  // Sleep Timer countdown
+  // ---------------------------------------------------------------- persistence
   useEffect(() => {
-    if (sleepTimerMinutes === null || sleepTimerMinutes <= 0) return;
-
-    const timer = setInterval(() => {
-      setSleepTimerMinutes((prev) => {
-        if (prev === null || prev <= 1) {
-          clearInterval(timer);
-          setIsPlaying(false);
-          return null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(LIBRARY_STORAGE_KEY);
+        if (cancelled) return;
+        if (raw) {
+          dispatch({ type: 'HYDRATE', library: JSON.parse(raw) });
         }
-        return prev - 1;
-      });
-    }, 60000);
+      } catch (e) {
+        // Corrupt or unreadable store: start from an empty library instead of
+        // crashing the app on launch.
+        console.warn('Armonia: libreria locale non caricata', e);
+      } finally {
+        if (!cancelled) setLibraryLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  const hydratedOnce = useRef(false);
+  const library = selectLibrary(state);
+  const libraryJson = JSON.stringify(library);
+  useEffect(() => {
+    if (!libraryLoaded) return;
+    if (!hydratedOnce.current) {
+      hydratedOnce.current = true;
+      return; // state still equals what was just read; nothing to write back
+    }
+    AsyncStorage.setItem(LIBRARY_STORAGE_KEY, libraryJson).catch((e) =>
+      console.warn('Armonia: salvataggio libreria fallito', e)
+    );
+  }, [libraryLoaded, libraryJson]);
+
+  // ---------------------------------------------------------------- sleep timer
+  useEffect(() => {
+    if (state.sleepTimerMinutes === null || state.sleepTimerMinutes <= 0) return;
+    const timer = setInterval(() => dispatch({ type: 'TICK_SLEEP_TIMER' }), 60000);
     return () => clearInterval(timer);
-  }, [sleepTimerMinutes]);
+  }, [state.sleepTimerMinutes]);
 
-  const updateProgress = (currentTimeSec: number, durationSec?: number) => {
-    if (typeof currentTimeSec === 'number' && !isNaN(currentTimeSec)) {
-      setPositionMillis(Math.floor(currentTimeSec * 1000));
-    }
-    if (typeof durationSec === 'number' && !isNaN(durationSec) && durationSec > 0) {
-      setDurationMillis(Math.floor(durationSec * 1000));
-    }
+  const value: AudioContextType = {
+    currentTrack: state.currentTrack,
+    isPlaying: state.isPlaying,
+    isBuffering: state.isBuffering,
+    positionMillis: state.positionMillis,
+    durationMillis: state.durationMillis,
+    sleepTimerMinutes: state.sleepTimerMinutes,
+    favorites: state.favorites,
+    externalFavorites: state.externalFavorites,
+    history: state.history,
+    libraryLoaded,
+    playTrack: (work, movementIndex = 0, interpretationId) =>
+      dispatch({ type: 'PLAY_TRACK', work, movementIndex, interpretationId }),
+    playQueue: (entries, startIndex = 0) => dispatch({ type: 'PLAY_QUEUE', entries, startIndex }),
+    advanceOnEnded: () => dispatch({ type: 'ENDED' }),
+    togglePlayPause: () => dispatch({ type: 'TOGGLE_PLAY_PAUSE' }),
+    setIsPlaying: (playing) => dispatch({ type: 'SET_PLAYING', playing }),
+    seekTo: (millis) => dispatch({ type: 'SEEK', millis }),
+    skipForward: (seconds) => dispatch({ type: 'SKIP_FORWARD', seconds }),
+    skipBackward: (seconds) => dispatch({ type: 'SKIP_BACKWARD', seconds }),
+    nextMovement: () => dispatch({ type: 'NEXT_MOVEMENT' }),
+    previousMovement: () => dispatch({ type: 'PREVIOUS_MOVEMENT' }),
+    setSleepTimer: (minutes) => dispatch({ type: 'SET_SLEEP_TIMER', minutes }),
+    toggleFavorite: (work) => dispatch({ type: 'TOGGLE_FAVORITE', work }),
+    isFavorite: (workId) =>
+      state.favorites.includes(workId) || state.externalFavorites.some((t) => t.id === workId),
+    removeFavorite: (workId) => dispatch({ type: 'REMOVE_FAVORITE', workId }),
+    clearHistory: () => dispatch({ type: 'CLEAR_HISTORY' }),
+    recordSearch: (term) => dispatch({ type: 'RECORD_SEARCH', term }),
+    updateProgress: (positionSec, durationSec) =>
+      dispatch({ type: 'PROGRESS', positionSec, durationSec }),
   };
 
-  const playTrack = async (
-    work: ClassicalWork,
-    movementIndex = 0,
-    interpretationId?: string
-  ) => {
-    const targetMovement = work.movements[movementIndex] || work.movements[0];
-    const targetInterpretation =
-      (interpretationId
-        ? work.interpretations.find((i) => i.id === interpretationId)
-        : null) || work.interpretations[0];
-
-    setCurrentTrack({
-      work,
-      movement: targetMovement,
-      interpretation: targetInterpretation,
-    });
-    setPositionMillis(0);
-    setIsBuffering(false);
-    setIsPlaying(true);
-  };
-
-  const togglePlayPause = () => {
-    setIsPlaying((prev) => !prev);
-  };
-
-  const seekTo = (millis: number) => {
-    setPositionMillis(millis);
-  };
-
-  const skipForward = (seconds = 15) => {
-    setPositionMillis((prev) => Math.min(prev + seconds * 1000, durationMillis || prev + seconds * 1000));
-  };
-
-  const skipBackward = (seconds = 15) => {
-    setPositionMillis((prev) => Math.max(prev - seconds * 1000, 0));
-  };
-
-  const nextMovement = () => {
-    if (!currentTrack) return;
-    const currentIndex = currentTrack.work.movements.findIndex(
-      (m) => m.id === currentTrack.movement.id
-    );
-    if (currentIndex < currentTrack.work.movements.length - 1) {
-      playTrack(
-        currentTrack.work,
-        currentIndex + 1,
-        currentTrack.interpretation.id
-      );
-    }
-  };
-
-  const previousMovement = () => {
-    if (!currentTrack) return;
-    const currentIndex = currentTrack.work.movements.findIndex(
-      (m) => m.id === currentTrack.movement.id
-    );
-    if (currentIndex > 0) {
-      playTrack(
-        currentTrack.work,
-        currentIndex - 1,
-        currentTrack.interpretation.id
-      );
-    } else {
-      seekTo(0);
-    }
-  };
-
-  const switchInterpretation = (interpretationId: string) => {
-    if (!currentTrack) return;
-    const currentIndex = currentTrack.work.movements.findIndex(
-      (m) => m.id === currentTrack.movement.id
-    );
-    playTrack(currentTrack.work, currentIndex, interpretationId);
-  };
-
-  const setSleepTimer = (minutes: number | null) => {
-    setSleepTimerMinutes(minutes);
-  };
-
-  const toggleFavorite = (workId: string) => {
-    setFavorites((prev) =>
-      prev.includes(workId) ? prev.filter((id) => id !== workId) : [...prev, workId]
-    );
-  };
-
-  const isFavorite = (workId: string) => favorites.includes(workId);
-
-  return (
-    <AudioContext.Provider
-      value={{
-        currentTrack,
-        isPlaying,
-        isBuffering,
-        positionMillis,
-        durationMillis,
-        sleepTimerMinutes,
-        favorites,
-        playTrack,
-        togglePlayPause,
-        setIsPlaying,
-        seekTo,
-        skipForward,
-        skipBackward,
-        nextMovement,
-        previousMovement,
-        switchInterpretation,
-        setSleepTimer,
-        toggleFavorite,
-        isFavorite,
-        updateProgress,
-      }}
-    >
-      {children}
-    </AudioContext.Provider>
-  );
+  return <AudioContext.Provider value={value}>{children}</AudioContext.Provider>;
 };
 
 export const useAudio = () => {

@@ -38,28 +38,51 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
     skipBackward,
     nextMovement,
     previousMovement,
-    switchInterpretation,
     setSleepTimer,
     toggleFavorite,
     isFavorite,
     updateProgress,
+    advanceOnEnded,
   } = useAudio();
 
   const ytRef = useRef<YoutubeIframeRef | null>(null);
   const [viewMode, setViewMode] = useState<'video' | 'cover'>('video');
   const [playerError, setPlayerError] = useState<string | null>(null);
-  const [showInterpretationModal, setShowInterpretationModal] = useState(false);
   const [showLibrettoModal, setShowLibrettoModal] = useState(false);
   const [showSleepTimerModal, setShowSleepTimerModal] = useState(false);
+
+  /**
+   * The iframe API DROPS any command sent before the player is ready
+   * (sendPostMessage returns early when !playerReady inside the library).
+   * The previous code fed `play={isPlaying}` straight in, and isPlaying was
+   * set true the moment a track was picked — so on the very first track the
+   * "play" signal was discarded, the video stayed cued, and the only thing
+   * that seemed to work was tapping inside the YouTube frame itself.
+   * Keeping a separate flag that only mirrors isPlaying AFTER onReady makes
+   * the button transitions land on a live player.
+   */
+  const [playerReady, setPlayerReady] = useState(false);
+  const [playRequested, setPlayRequested] = useState(false);
+
+  useEffect(() => {
+    if (playerReady) setPlayRequested(isPlaying);
+  }, [isPlaying, playerReady]);
+
+  // ---------------------------------------------------------------------
+  // PREROLL ADS - optional experiment, OFF by default, deliberately not a UX
+  // promise. Pointing the embedded player at the YouTube Music embed endpoint
+  // (`https://music.youtube.com/embed`) is a widely used community trick that
+  // OFTEN serves these videos without ad breaks. It is not an official API:
+  // it can start failing or refuse single videos at any time, and YouTube's
+  // monetisation terms do not really bless skipping ads. Flip to true, build,
+  // and check on device; if a video stops starting, flip back to false.
+  // ---------------------------------------------------------------------
+  const EMBED_BASE_URL_OVERRIDE: string | undefined = undefined; // e.g. 'https://music.youtube.com/embed'
 
   // Handle hardware back press on Android to minimize player
   useEffect(() => {
     const onBackPress = () => {
       if (visible) {
-        if (showInterpretationModal) {
-          setShowInterpretationModal(false);
-          return true;
-        }
         if (showLibrettoModal) {
           setShowLibrettoModal(false);
           return true;
@@ -76,7 +99,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => backHandler.remove();
-  }, [visible, showInterpretationModal, showLibrettoModal, showSleepTimerModal, onClose]);
+  }, [visible, showLibrettoModal, showSleepTimerModal, onClose]);
 
   // Periodic position poller when playing
   useEffect(() => {
@@ -117,7 +140,8 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
 
   const handleStateChange = (state: string) => {
     if (state === PLAYER_STATES.ENDED) {
-      nextMovement();
+      // Movements first, then the queue (next saved/next searched recording).
+      advanceOnEnded();
     } else if (state === PLAYER_STATES.PLAYING) {
       setIsPlaying(true);
       setPlayerError(null);
@@ -199,7 +223,7 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
           </TouchableOpacity>
 
           <TouchableOpacity
-            onPress={() => toggleFavorite(work.id)}
+            onPress={() => toggleFavorite(currentTrack.work)}
             style={styles.iconBtn}
           >
             <Ionicons
@@ -264,10 +288,12 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
             ref={ytRef}
             height={viewMode === 'video' ? 220 : 1}
             width={viewMode === 'video' ? width - 40 : 1}
-            play={isPlaying}
+            play={playRequested}
             videoId={videoId}
             onChangeState={handleStateChange}
+            onReady={() => setPlayerReady(true)}
             forceAndroidAutoplay={true}
+            baseUrlOverride={EMBED_BASE_URL_OVERRIDE}
             initialPlayerParams={{
               controls: true,
               rel: false,
@@ -309,30 +335,6 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
             <Text style={styles.tempoText}>Tempo: {movement.tempo}</Text>
           )}
         </View>
-
-        {/* Interpretation Switcher Pill */}
-        <TouchableOpacity
-          style={styles.interpretationCard}
-          onPress={() => setShowInterpretationModal(true)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.interpretationInfo}>
-            <View style={styles.interpretationHeaderRow}>
-              <Ionicons name="disc-outline" size={16} color={Colors.gold} />
-              <Text style={styles.interpretationLabel}>Esecuzione Attiva</Text>
-            </View>
-            <Text style={styles.performerText} numberOfLines={1}>
-              {interpretation.label}
-            </Text>
-            {interpretation.year && (
-              <Text style={styles.yearText}>Anno/Versione: {interpretation.year}</Text>
-            )}
-          </View>
-          <View style={styles.changeBadge}>
-            <Text style={styles.changeBadgeText}>Confronta</Text>
-            <Ionicons name="swap-horizontal" size={14} color={Colors.gold} />
-          </View>
-        </TouchableOpacity>
 
         {/* Opera Libretto Action Button (if applicable) */}
         {work.libretto && work.libretto.length > 0 && (
@@ -423,76 +425,15 @@ export const FullPlayerModal: React.FC<FullPlayerModalProps> = ({ visible, onClo
           </TouchableOpacity>
         </View>
 
-        {/* Stream Quality Footer */}
-        <View style={styles.streamInfoCard}>
-          <Ionicons name="musical-notes-outline" size={14} color={Colors.gold} />
-          <Text style={styles.streamInfoText}>
-            Harmonia YouTube Engine · Audio & Video HD Integrato
+        {/* Opera: the execution performer and year, WITHOUT any comparison entry */}
+        <View style={styles.performerLine}>
+          <Ionicons name="person-outline" size={14} color={Colors.gold} />
+          <Text style={styles.performerLineText} numberOfLines={1}>
+            {interpretation.performer}
+            {interpretation.year ? ` · ${interpretation.year}` : ''}
           </Text>
         </View>
       </ScrollView>
-
-      {/* SubModal: Confronto Esecuzioni */}
-      <Modal
-        visible={showInterpretationModal}
-        animationType="fade"
-        transparent={true}
-      >
-        <View style={styles.subModalOverlay}>
-          <View style={styles.subModalContent}>
-            <View style={styles.subModalHeader}>
-              <Text style={styles.subModalTitle}>Confronto Esecuzioni</Text>
-              <TouchableOpacity
-                onPress={() => setShowInterpretationModal(false)}
-              >
-                <Ionicons name="close" size={22} color={Colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.subModalDesc}>
-              Scegli l'interpretazione che preferisci per quest'opera:
-            </Text>
-
-            {work.interpretations.map((interp) => {
-              const isSelected = interp.id === interpretation.id;
-              return (
-                <TouchableOpacity
-                  key={interp.id}
-                  style={[
-                    styles.interpretationItem,
-                    isSelected && styles.interpretationItemSelected,
-                  ]}
-                  onPress={() => {
-                    switchInterpretation(interp.id);
-                    setShowInterpretationModal(false);
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        styles.interpItemLabel,
-                        isSelected && { color: Colors.gold },
-                      ]}
-                    >
-                      {interp.label}
-                    </Text>
-                    <Text style={styles.interpItemSub}>
-                      {interp.performer}{' '}
-                      {interp.conductor ? `· Dir. ${interp.conductor}` : ''}
-                    </Text>
-                  </View>
-                  {isSelected && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={22}
-                      color={Colors.gold}
-                    />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      </Modal>
 
       {/* SubModal: Sleep Timer */}
       <Modal visible={showSleepTimerModal} animationType="fade" transparent={true}>
@@ -892,6 +833,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 10,
     elevation: 8,
+  },
+  performerLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 18,
+  },
+  performerLineText: {
+    flex: 1,
+    fontSize: 12,
+    color: Colors.textSecondary,
   },
   streamInfoCard: {
     flexDirection: 'row',

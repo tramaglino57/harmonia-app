@@ -12,7 +12,6 @@ export const Header: React.FC<HeaderProps> = ({ onSearchPress }) => {
     <View style={styles.container}>
       <View>
         <Text style={styles.brandTitle}>HARMONIA</Text>
-        <Text style={styles.brandSubtitle}>Musica Classica, Antica & Lirica</Text>
       </View>
       {onSearchPress && (
         <TouchableOpacity

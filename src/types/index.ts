@@ -63,3 +63,31 @@ export interface PlayerCurrentTrack {
   movement: Movement;
   interpretation: Interpretation;
 }
+
+/** One slot of the playback queue. */
+export interface QueueEntry {
+  work: ClassicalWork;
+  movementIndex: number;
+  interpretationId?: string;
+}
+
+/**
+ * A YouTube search result kept as a favorite. Catalog works are referenced by
+ * id, but arbitrary YouTube recordings have no id in `classicalCatalog.ts`, so
+ * the row itself must be persisted for the favorites screen to show and replay it.
+ */
+export interface ExternalFavoriteTrack {
+  id: string; // 'yt-<videoId>' — same id used for the work built from it
+  videoId: string;
+  title: string;
+  uploaderName: string;
+  durationString: string;
+  thumbnailUrl: string;
+  savedAt: number;
+}
+
+/** A term the user actually searched, newest first. */
+export interface SearchHistoryItem {
+  term: string;
+  at: number;
+}

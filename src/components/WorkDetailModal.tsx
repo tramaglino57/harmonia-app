@@ -56,7 +56,7 @@ export const WorkDetailModal: React.FC<WorkDetailModalProps> = ({
 
           <View style={styles.headerRight}>
             <TouchableOpacity
-              onPress={() => toggleFavorite(work.id)}
+              onPress={() => toggleFavorite(work)}
               style={styles.iconBtn}
             >
               <Ionicons

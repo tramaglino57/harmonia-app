@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { WORKS, COMPOSERS } from '../data/classicalCatalog';
 import { ClassicalWork } from '../types';
+import { buildWorkFromSearchResult } from '../utils/externalWork';
 import { useAudio } from '../context/AudioContext';
 
 interface FavoritesScreenProps {
@@ -22,7 +23,7 @@ export const FavoritesScreen: React.FC<FavoritesScreenProps> = ({
   onSelectWork,
   onOpenPlayer,
 }) => {
-  const { favorites, playTrack } = useAudio();
+  const { favorites, externalFavorites, playQueue } = useAudio();
 
   const favoriteWorks = WORKS.filter((w) => favorites.includes(w.id));
 
@@ -69,7 +70,51 @@ export const FavoritesScreen: React.FC<FavoritesScreenProps> = ({
                 <TouchableOpacity
                   style={styles.playBtn}
                   onPress={() => {
-                    playTrack(work, 0);
+                    playQueue([{ work, movementIndex: 0 }], 0);
+                    onOpenPlayer();
+                  }}
+                >
+                  <Ionicons name="play" size={16} color="#0C0C12" />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            );
+          })}
+
+          {externalFavorites.map((track) => {
+            const extWork = buildWorkFromSearchResult({
+              videoId: track.videoId,
+              title: track.title,
+              uploaderName: track.uploaderName,
+              durationString: track.durationString,
+              thumbnailUrl: track.thumbnailUrl,
+            });
+            return (
+              <TouchableOpacity
+                key={track.id}
+                style={styles.card}
+                onPress={() => {
+                  playQueue([{ work: extWork, movementIndex: 0 }], 0);
+                  onOpenPlayer();
+                }}
+                activeOpacity={0.8}
+              >
+                <Image
+                  source={{ uri: track.thumbnailUrl || extWork.coverImage }}
+                  style={styles.cover}
+                />
+                <View style={styles.cardContent}>
+                  <Text style={styles.catalog}>REGISTRAZIONE YOUTUBE</Text>
+                  <Text style={styles.cardTitle} numberOfLines={1}>
+                    {track.title}
+                  </Text>
+                  <Text style={styles.composer}>{track.uploaderName}</Text>
+                  <Text style={styles.movementsCount}>{track.durationString || 'YouTube'}</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.playBtn}
+                  onPress={() => {
+                    playQueue([{ work: extWork, movementIndex: 0 }], 0);
                     onOpenPlayer();
                   }}
                 >
